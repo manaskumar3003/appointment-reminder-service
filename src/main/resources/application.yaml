@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: appointment
+
+  datasource:
+    url: jdbc:postgresql://localhost:5431/appointments
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    open-in-view: false
+
+  # Let in-flight sends finish on SIGTERM, so a deploy doesn't strand a batch.
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  shutdown: graceful
+
+reminders:
+  # 500 every 15s = 2000/min per instance, against a peak need of ~500/min.
+  batch-size: 500
+  poll-interval-ms: 15000
+  # Retries before a reminder is parked in FAILED.
+  max-attempts: 3
+  # How long a claim may sit in PROCESSING before the worker is assumed dead.
+  lease-minutes: 5
