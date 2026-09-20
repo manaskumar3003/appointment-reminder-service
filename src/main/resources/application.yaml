@@ -22,7 +22,10 @@ reminders:
   # 500 every 15s = 2000/min per instance, against a peak need of ~500/min.
   batch-size: 500
   poll-interval-ms: 15000
-  # Retries before a reminder is parked in FAILED.
+  # Retries before a reminder is parked in FAILED, and how long to wait between them.
+  # 3 attempts 5 minutes apart rides out a provider blip; retrying on the next poll
+  # would spend all three inside a minute.
   max-attempts: 3
+  retry-delay-minutes: 5
   # How long a claim may sit in PROCESSING before the worker is assumed dead.
   lease-minutes: 5

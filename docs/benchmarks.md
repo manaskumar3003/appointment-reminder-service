@@ -50,9 +50,9 @@ update and the same commit that a live reminder does.
 
 | Run | 50,000 reminders drained in | Throughput | Per reminder |
 |---|---|---|---|
-| 1 | 14.79s | 3,382/sec | 0.30 ms |
-| 2 | 15.52s | 3,222/sec | 0.31 ms |
-| 3 | 14.90s | 3,356/sec | 0.30 ms |
+| 1 | 15.80s | 3,164/sec | 0.32 ms |
+| 2 | 14.53s | 3,441/sec | 0.29 ms |
+| 3 | 15.11s | 3,310/sec | 0.30 ms |
 
 **~3,300 reminders/second.** The test also asserts `notification_log` holds
 exactly 50,000 rows — so it doubles as a dedup test at full daily volume, under
@@ -68,9 +68,9 @@ instant, clear in about **30 seconds**.
 
 | Run | Elapsed | Throughput | Per booking |
 |---|---|---|---|
-| 1 | 0.21s | 9,756/sec | 0.10 ms |
-| 2 | 0.17s | 11,976/sec | 0.08 ms |
-| 3 | 0.20s | 9,852/sec | 0.10 ms |
+| 1 | 0.19s | 10,309/sec | 0.10 ms |
+| 2 | 0.19s | 10,582/sec | 0.09 ms |
+| 3 | 0.18s | 10,929/sec | 0.09 ms |
 
 **~10,000 bookings/second.** The brief's 50,000 a day averages **0.6/second**.
 

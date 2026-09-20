@@ -240,6 +240,46 @@ class ReminderFlowTest {
                 .isEqualTo(ReminderStatus.SKIPPED);
     }
 
+    /**
+     * A failed send must wait out the backoff. Without it three attempts burn in 45 seconds
+     * and a short provider outage fails every reminder in flight for good.
+     */
+    @Test
+    void failedReminderIsHeldBackUntilTheRetryDelayHasElapsed() {
+        Reminder due = dueReminder();
+
+        reminderService.recordFailure(due.getId(), new RuntimeException("provider down"));
+
+        Reminder afterFailure = reminderRepository.findById(due.getId()).orElseThrow();
+        assertThat(afterFailure.getStatus()).isEqualTo(ReminderStatus.PENDING);
+        assertThat(afterFailure.getNextAttemptAt()).isAfter(OffsetDateTime.now());
+
+        worker.processReminders();
+        assertThat(notificationLogRepository.count()).isZero();
+
+        // Once the delay has passed the retry goes through.
+        afterFailure.setNextAttemptAt(OffsetDateTime.now().minusMinutes(1));
+        reminderRepository.saveAndFlush(afterFailure);
+        worker.processReminders();
+
+        assertThat(notificationLogRepository.count()).isEqualTo(1);
+        assertThat(reminderRepository.findById(due.getId()).orElseThrow().getStatus())
+                .isEqualTo(ReminderStatus.SENT);
+    }
+
+    @Test
+    void reminderOutOfAttemptsIsFailedRatherThanRetried() {
+        Reminder spent = dueReminder();
+        spent.setAttemptCount(3);
+        reminderRepository.saveAndFlush(spent);
+
+        reminderService.recordFailure(spent.getId(), new RuntimeException("provider down"));
+
+        Reminder after = reminderRepository.findById(spent.getId()).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(ReminderStatus.FAILED);
+        assertThat(after.getNextAttemptAt()).isNull();
+    }
+
     /** A reminder that kills its worker rather than throwing must still hit the cap. */
     @Test
     void reminderThatKeepsStrandingItsWorkerEventuallyFails() {

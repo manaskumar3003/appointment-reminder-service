@@ -25,6 +25,7 @@ public interface ReminderRepository extends JpaRepository<Reminder, Long> {
                 JOIN appointments a ON a.id = r.appointment_id
                 WHERE r.status = 'PENDING'
                   AND r.scheduled_at <= now()
+                  AND (r.next_attempt_at IS NULL OR r.next_attempt_at <= now())
                   AND a.status = 'SCHEDULED'
                 ORDER BY r.scheduled_at
                 LIMIT :limit

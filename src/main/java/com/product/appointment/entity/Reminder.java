@@ -44,6 +44,10 @@ public class Reminder {
     @Column(name = "processing_started_at")
     private OffsetDateTime processingStartedAt;
 
+    /** Set on failure; the claim query won't pick the reminder up again until it passes. */
+    @Column(name = "next_attempt_at")
+    private OffsetDateTime nextAttemptAt;
+
     @Column(name = "sent_at")
     private OffsetDateTime sentAt;
 
@@ -101,6 +105,14 @@ public class Reminder {
 
     public void setProcessingStartedAt(OffsetDateTime processingStartedAt) {
         this.processingStartedAt = processingStartedAt;
+    }
+
+    public OffsetDateTime getNextAttemptAt() {
+        return nextAttemptAt;
+    }
+
+    public void setNextAttemptAt(OffsetDateTime nextAttemptAt) {
+        this.nextAttemptAt = nextAttemptAt;
     }
 
     public OffsetDateTime getSentAt() {

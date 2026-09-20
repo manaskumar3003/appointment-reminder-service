@@ -57,6 +57,6 @@ Proven by `ReminderFlowTest.concurrentWorkersCannotNotifyTheSameCustomerTwice` �
 - **A reminder that kills its worker every time** — the reaper respects the attempt cap too, so it lands in `FAILED` instead of looping forever.
 - **Instances with drifting clocks** — due-ness and the lease are both decided by the database's clock, not each app's.
 - **Deploy during a batch** — graceful shutdown lets in-flight sends finish instead of stranding them.
-- **A send that keeps failing** — retried, then parked in `FAILED`. Retrying forever every 15 seconds is a slow leak.
+- **A send that keeps failing** — held back 5 minutes between attempts, then parked in `FAILED`. The failures worth retrying are rate limits and outages, so retrying on the next 15-second poll would spend all three attempts inside a minute and dead-letter everything a two-minute blip touched.
 - **The poll itself throws** — caught and logged. An escaping exception kills a `@Scheduled` job for the life of the JVM: the service would go quiet and still look healthy.
 - **Bad timestamp or blank contact** — 400, not 500.

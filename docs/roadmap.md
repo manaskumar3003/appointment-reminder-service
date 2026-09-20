@@ -73,8 +73,9 @@ database work.
 
 ## Also on the list
 
+- [ ] **Exponential backoff** — retries are a flat 5 minutes today, which is fine for a blip and slow for a long outage
 - [ ] **Harder tests** — kill a real forked instance mid-batch; an intermittently
       failing sender; sustained booking *and* draining at once
-- [ ] **Squash the migrations** — four Flyway files, two of which fix the first
+- [ ] **Squash the migrations** — five Flyway files, two of which fix the first
 - [ ] Pagination on any future list endpoint, before someone asks for all 50,000
 - [ ] An appointment-completed status and endpoint, once something actually closes them out

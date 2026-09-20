@@ -123,6 +123,7 @@ Everything tunable lives under `reminders.*` in `src/main/resources/application.
 | `batch-size` | 500 | Reminders claimed per poll, per instance. |
 | `poll-interval-ms` | 15000 | How often a worker looks for due reminders. |
 | `max-attempts` | 3 | Retries before a reminder is parked in `FAILED`. |
+| `retry-delay-minutes` | 5 | How long a failed reminder waits before it's eligible again. |
 | `lease-minutes` | 5 | How long a claim may sit in `PROCESSING` before it is assumed dead and retried. |
 
 ## Open questions

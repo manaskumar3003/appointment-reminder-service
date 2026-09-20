@@ -28,19 +28,22 @@ public class ReminderService {
     private final int batchSize;
     private final int maxAttempts;
     private final int leaseMinutes;
+    private final int retryDelayMinutes;
 
     public ReminderService(ReminderRepository reminderRepository,
                            NotificationLogRepository notificationLogRepository,
                            NotificationSender notificationSender,
                            @Value("${reminders.batch-size:500}") int batchSize,
                            @Value("${reminders.max-attempts:3}") int maxAttempts,
-                           @Value("${reminders.lease-minutes:5}") int leaseMinutes) {
+                           @Value("${reminders.lease-minutes:5}") int leaseMinutes,
+                           @Value("${reminders.retry-delay-minutes:5}") int retryDelayMinutes) {
         this.reminderRepository = reminderRepository;
         this.notificationLogRepository = notificationLogRepository;
         this.notificationSender = notificationSender;
         this.batchSize = batchSize;
         this.maxAttempts = maxAttempts;
         this.leaseMinutes = leaseMinutes;
+        this.retryDelayMinutes = retryDelayMinutes;
     }
 
     /** Commits the claim before any sending: an open claim would block the log insert on its own lock. */
@@ -100,9 +103,13 @@ public class ReminderService {
         boolean exhausted = reminder.getAttemptCount() >= maxAttempts;
         reminder.setStatus(exhausted ? ReminderStatus.FAILED : ReminderStatus.PENDING);
         reminder.setProcessingStartedAt(null);
+        // Hold it back before retrying: the failures worth retrying are rate limits and
+        // outages, and hammering the next poll would spend every attempt inside a minute.
+        reminder.setNextAttemptAt(exhausted ? null
+                : OffsetDateTime.now().plusMinutes(retryDelayMinutes));
         log.warn("Reminder {} failed on attempt {}/{}{}", reminderId,
                 reminder.getAttemptCount(), maxAttempts,
-                exhausted ? " - giving up" : " - will retry", cause);
+                exhausted ? " - giving up" : " - retrying in " + retryDelayMinutes + "m", cause);
     }
 
     @Transactional
