@@ -7,10 +7,16 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface ReminderRepository extends JpaRepository<Reminder, Long> {
 
     List<Reminder> findByAppointmentIdOrderByScheduledAt(Long appointmentId);
+
+    /** Fetches the appointment in the same query - the send path always needs it, and a
+     *  lazy load per reminder is a second round trip for every row in the batch. */
+    @Query("SELECT r FROM Reminder r JOIN FETCH r.appointment WHERE r.id = :id")
+    Optional<Reminder> findByIdWithAppointment(@Param("id") Long id);
 
     /** Claims and marks PROCESSING in one statement; SKIP LOCKED keeps concurrent workers disjoint. */
     @Modifying

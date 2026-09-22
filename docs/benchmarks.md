@@ -46,15 +46,19 @@ Nothing is stubbed or shortcut. Each reminder goes through the same claim with
 `FOR UPDATE SKIP LOCKED`, the same `notification_log` insert, the same status
 update and the same commit that a live reminder does.
 
+The send path loads the reminder and its appointment in one query. Letting the
+appointment lazy-load instead costs a second round trip per row — 500 extra
+queries per batch, and about 7% of the throughput below.
+
 ### Result
 
 | Run | 50,000 reminders drained in | Throughput | Per reminder |
 |---|---|---|---|
-| 1 | 15.80s | 3,164/sec | 0.32 ms |
-| 2 | 14.53s | 3,441/sec | 0.29 ms |
-| 3 | 15.11s | 3,310/sec | 0.30 ms |
+| 1 | 13.99s | 3,573/sec | 0.28 ms |
+| 2 | 14.73s | 3,394/sec | 0.29 ms |
+| 3 | 13.72s | 3,645/sec | 0.27 ms |
 
-**~3,300 reminders/second.** The test also asserts `notification_log` holds
+**~3,500 reminders/second.** The test also asserts `notification_log` holds
 exactly 50,000 rows — so it doubles as a dedup test at full daily volume, under
 four-way contention.
 
@@ -68,16 +72,16 @@ instant, clear in about **30 seconds**.
 
 | Run | Elapsed | Throughput | Per booking |
 |---|---|---|---|
-| 1 | 0.19s | 10,309/sec | 0.10 ms |
-| 2 | 0.19s | 10,582/sec | 0.09 ms |
-| 3 | 0.18s | 10,929/sec | 0.09 ms |
+| 1 | 0.21s | 9,479/sec | 0.11 ms |
+| 2 | 0.23s | 8,772/sec | 0.11 ms |
+| 3 | 0.22s | 8,969/sec | 0.11 ms |
 
-**~10,000 bookings/second.** The brief's 50,000 a day averages **0.6/second**.
+**~9,000 bookings/second.** The brief's 50,000 a day averages **0.6/second**.
 
 ## Caveats
 
 These numbers say the *design* isn't the bottleneck. They don't say the service
-will do 3,300/sec in production:
+will do 3,500/sec in production:
 
 - **Real sending is a network call.** An SMS provider takes 50–500ms and rate
   limits you. That, not Postgres, sets real throughput — and it's why the worker

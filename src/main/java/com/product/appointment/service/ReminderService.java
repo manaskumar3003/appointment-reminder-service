@@ -56,7 +56,7 @@ public class ReminderService {
     @Transactional
     public void sendClaimed(Long reminderId) {
 
-        Reminder reminder = reminderRepository.findById(reminderId).orElseThrow();
+        Reminder reminder = reminderRepository.findByIdWithAppointment(reminderId).orElseThrow();
 
         String stale = staleReason(reminder.getAppointment());
         if (stale != null) {

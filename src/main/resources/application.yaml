@@ -3,13 +3,26 @@ spring:
     name: appointment
 
   datasource:
-    url: jdbc:postgresql://localhost:5431/appointments
-    username: postgres
-    password: postgres
+    # Defaults match docker-compose so a local run needs no setup; real environments
+    # supply these, so no credential is baked into the image.
+    url: ${DB_URL:jdbc:postgresql://localhost:5431/appointments}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      # One instance runs one poll at a time plus API traffic; 10 is ample and keeps
+      # max_connections free for the other instances. Raise with instance count.
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: 2
+      # Fail fast rather than pile up threads waiting on an exhausted pool.
+      connection-timeout: 5000
 
   jpa:
     open-in-view: false
+    properties:
+      # No query here should take seconds. A stuck statement holding a claim would
+      # block the batch until the lease expired.
+      jakarta.persistence.query.timeout: 10000
 
   # Let in-flight sends finish on SIGTERM, so a deploy doesn't strand a batch.
   lifecycle:

@@ -17,7 +17,15 @@ public class StubNotificationSender implements NotificationSender {
                 reminder.getId(),
                 reminder.getAppointment().getId(),
                 reminder.getReminderType(),
-                reminder.getAppointment().getCustomerContact(),
+                mask(reminder.getAppointment().getCustomerContact()),
                 reminder.getAppointment().getScheduledAt());
+    }
+
+    /** Enough to tell two customers apart in a log, not enough to be a leak. */
+    private static String mask(String contact) {
+        if (contact == null || contact.length() < 6) {
+            return "****";
+        }
+        return contact.substring(0, 3) + "****" + contact.substring(contact.length() - 2);
     }
 }

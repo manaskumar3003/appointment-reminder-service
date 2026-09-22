@@ -12,23 +12,6 @@ Books vehicle service appointments and reminds the customer 24 hours and 2 hours
 <a href="docs/roadmap.md">Roadmap</a>
 </p>
 
-<br>
-
-<table align="center">
-<tr><td align="center" width="700">
-
-### ▶ &nbsp; Watch the demo &nbsp;·&nbsp; 5 min
-
-<a href="REPLACE_WITH_LOOM_LINK"><b>loom.com/share/…</b></a>
-
-Creating an appointment over HTTP, the reminders firing in the service logs,
-and the matching rows in Postgres.
-
-</td></tr>
-</table>
-
-<br>
-
 ## How to run
 
 Needs Docker and JDK 21. Nothing else — Maven comes with the wrapper.
@@ -125,6 +108,10 @@ Everything tunable lives under `reminders.*` in `src/main/resources/application.
 | `max-attempts` | 3 | Retries before a reminder is parked in `FAILED`. |
 | `retry-delay-minutes` | 5 | How long a failed reminder waits before it's eligible again. |
 | `lease-minutes` | 5 | How long a claim may sit in `PROCESSING` before it is assumed dead and retried. |
+
+Database credentials come from the environment — `DB_URL`, `DB_USERNAME`,
+`DB_PASSWORD`, `DB_POOL_MAX` — defaulting to the docker-compose values so a local
+run needs no setup and no credential is baked into the image.
 
 ## Open questions
 
