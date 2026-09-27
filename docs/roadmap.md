@@ -22,10 +22,11 @@ What another week would add, in the order I'd do it.
 ### 🔴 Real sender + reconciliation
 
 **The biggest gap between this and production.** Today "sending" is a log line
-inside the same transaction as the `SENT` status, so the two can't disagree. A
-real provider breaks that: the HTTP call can succeed and the transaction
-recording it can still fail. Exactly-once stops being possible and the question
-becomes *which way to be wrong*.
+printed inside the transaction that records `SENT`. A crash between the two
+repeats a log line — harmless for a stub. A real provider makes the same window
+a real duplicate: the HTTP call can succeed and the transaction recording it can
+still fail. Exactly-once isn't possible, so the question becomes *which way to
+be wrong*.
 
 The fix: record intent before the call. `notification_log` gains a
 `provider_message_id` and a status of its own, the row is written before the

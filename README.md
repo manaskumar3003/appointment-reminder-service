@@ -12,6 +12,20 @@ Books vehicle service appointments and reminds the customer 24 hours and 2 hours
 <a href="docs/roadmap.md">Roadmap</a>
 </p>
 
+> **Since submission.** Submitted on 23 Sep at
+> [`ff08af4`](https://github.com/manaskumar3003/appointment-reminder-service/tree/ff08af4).
+> A later review of my own code found two bugs, fixed in `f4607b2` with tests that
+> fail on the submitted version:
+> - Spring's own errors (405, 415, 404 for an unknown path, 400 for a non-numeric id)
+>   came back as 500s, because the catch-all exception handler claimed them.
+> - A worker that lost a lease race could overwrite a delivered reminder's `SENT`
+>   with `PENDING` — or `FAILED` on its last attempt. The customer still got exactly
+>   one notification; the recorded status was wrong.
+>
+> Same commit: `/actuator/health`, raw-SQL tests proving the constraints hold without
+> the application, tests split by layer, and corrected claims about `@Scheduled` and
+> exactly-once delivery.
+
 ## How to run
 
 Needs Docker and JDK 21. Nothing else — Maven comes with the wrapper.
@@ -129,7 +143,7 @@ run needs no setup and no credential is baked into the image.
 | Stub sender that logs the payload | [`StubNotificationSender`](src/main/java/com/product/appointment/notification/StubNotificationSender.java) |
 | Never the same reminder twice, provably | `UNIQUE(reminder_id)` on `notification_log`. Tests: `concurrentWorkersCannotNotifyTheSameCustomerTwice`, `databaseRefusesASecondDeliveryOfTheSameReminder`, and 50,000 reminders under four workers in the [benchmark](docs/benchmarks.md). [How it works](docs/design-decisions.md#how-never-twice-works) |
 | 50,000 appointments a day, 500 dealerships | [Measured](docs/benchmarks.md) at ~3,500 reminders/sec; [scaling notes](docs/deployment.md) |
-| Corner cases and failures | [Corner cases](docs/design-decisions.md#corner-cases), each with a test under [`src/test`](src/test/java/com/product/appointment) |
+| Corner cases and failures | [Corner cases](docs/design-decisions.md#corner-cases), tested under [`src/test`](src/test/java/com/product/appointment) — except clock drift, graceful shutdown and a poll that throws, which are handled by design but not tested |
 | Tests | `./mvnw test`, against a real Postgres |
 | How to run, design decisions | This page, [Design Decisions](docs/design-decisions.md) |
 | Design diagram | [Architecture](docs/architecture.md) |
