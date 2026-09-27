@@ -31,6 +31,14 @@ spring:
 server:
   shutdown: graceful
 
+management:
+  endpoints:
+    web:
+      exposure:
+        # Health only. It includes a database check, so an orchestrator sees a lost
+        # Postgres as DOWN rather than a running JVM as UP.
+        include: health
+
 reminders:
   # 500 every 15s = 2000/min per instance, against a peak need of ~500/min.
   batch-size: 500

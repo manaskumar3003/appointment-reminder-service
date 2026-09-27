@@ -8,7 +8,7 @@
 ./mvnw test -Dbenchmark=true -Dtest=ReminderBenchmarkTest
 ```
 
-Code: [`ReminderBenchmarkTest`](../src/test/java/com/product/appointment/ReminderBenchmarkTest.java).
+Code: [`ReminderBenchmarkTest`](../src/test/java/com/product/appointment/benchmark/ReminderBenchmarkTest.java).
 Disabled unless `-Dbenchmark=true`, so it never runs in a normal `./mvnw test`.
 
 ## Draining 50,000 reminders

@@ -34,9 +34,10 @@ That insert lives in `ReminderService`, not inside the stub sender, so the guara
 Two details that matter:
 
 - The log row and the `SENT` status commit **together**, so there's no crash window where a reminder is marked sent with no record, or recorded with no mark.
-- If two workers somehow race, the loser's insert breaks the constraint, its transaction rolls back, the reminder goes back to `PENDING`, and the retry sees the log row and marks it sent *without sending*. One notification either way.
+- That makes the stub exactly-once. A real provider can't join the transaction: if its call succeeds and the commit then fails, the reminder is retried and sent again. With a real sender this is **at-least-once**, and closing the gap needs a provider that honours an idempotency key — see [Roadmap](roadmap.md#-real-sender--reconciliation).
+- If two workers somehow race — a send outlived its lease and the reminder was reclaimed — the loser's insert waits on the winner's, then breaks the constraint and rolls back before it reaches the sender. Its failure is recorded with a conditional `UPDATE … WHERE status = 'PROCESSING'`, so it can't overwrite the winner's `SENT`. One notification, and the status stays true.
 
-Proven by `ReminderFlowTest.concurrentWorkersCannotNotifyTheSameCustomerTwice` — eight workers, twenty due reminders, batch size pinned to 1 so they actually fight over them. All twenty sent, none twice.
+Proven by `NoDuplicateReminderTest.concurrentWorkersCannotNotifyTheSameCustomerTwice` — eight workers, twenty due reminders, batch size pinned to 1 so they actually fight over them. All twenty sent, none twice.
 
 ## Why two instances — and does one work?
 
@@ -58,5 +59,5 @@ Proven by `ReminderFlowTest.concurrentWorkersCannotNotifyTheSameCustomerTwice` �
 - **Instances with drifting clocks** — due-ness and the lease are both decided by the database's clock, not each app's.
 - **Deploy during a batch** — graceful shutdown lets in-flight sends finish instead of stranding them.
 - **A send that keeps failing** — held back 5 minutes between attempts, then parked in `FAILED`. The failures worth retrying are rate limits and outages, so retrying on the next 15-second poll would spend all three attempts inside a minute and dead-letter everything a two-minute blip touched.
-- **The poll itself throws** — caught and logged. An escaping exception kills a `@Scheduled` job for the life of the JVM: the service would go quiet and still look healthy.
+- **The poll itself throws** — for example the database is briefly unreachable. Caught and logged with what failed, and the next poll retries. Nothing is lost: every claim is either committed or rolled back, and a stranded claim is reclaimed by the lease.
 - **Bad timestamp or blank contact** — 400, not 500.

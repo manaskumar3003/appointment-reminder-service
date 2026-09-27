@@ -93,20 +93,24 @@ public class ReminderService {
         return null;
     }
 
-    /** Fresh transaction - the failed send's transaction is already rolled back. */
+    /**
+     * Fresh transaction - the failed send's transaction is already rolled back.
+     *
+     * One conditional UPDATE rather than read-then-write: a worker that lost a lease race fails on
+     * the notification_log constraint after the winner committed SENT, and must not undo that.
+     */
     @Transactional
     public void recordFailure(Long reminderId, Exception cause) {
-        Reminder reminder = reminderRepository.findById(reminderId).orElse(null);
-        if (reminder == null) {
-            return;
-        }
-        boolean exhausted = reminder.getAttemptCount() >= maxAttempts;
-        reminder.setStatus(exhausted ? ReminderStatus.FAILED : ReminderStatus.PENDING);
-        reminder.setProcessingStartedAt(null);
         // Hold it back before retrying: the failures worth retrying are rate limits and
         // outages, and hammering the next poll would spend every attempt inside a minute.
-        reminder.setNextAttemptAt(exhausted ? null
-                : OffsetDateTime.now().plusMinutes(retryDelayMinutes));
+        int released = reminderRepository.releaseAfterFailure(reminderId, maxAttempts, retryDelayMinutes);
+        if (released == 0) {
+            log.warn("Reminder {} failed but is no longer PROCESSING; leaving its state alone",
+                    reminderId, cause);
+            return;
+        }
+        Reminder reminder = reminderRepository.findById(reminderId).orElseThrow();
+        boolean exhausted = reminder.getStatus() == ReminderStatus.FAILED;
         log.warn("Reminder {} failed on attempt {}/{}{}", reminderId,
                 reminder.getAttemptCount(), maxAttempts,
                 exhausted ? " - giving up" : " - retrying in " + retryDelayMinutes + "m", cause);

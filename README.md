@@ -1,7 +1,7 @@
 <h1 align="center">Appointment Reminder Service</h1>
 
 <p align="center">
-Books vehicle service appointments and reminds the customer 24 hours and 2 hours before — <b>exactly once</b>, enforced by the database, not by hope.
+Books vehicle service appointments and reminds the customer 24 hours and 2 hours before — <b>never the same reminder twice</b>, enforced by the database, not by hope.
 </p>
 
 <p align="center">
@@ -63,8 +63,10 @@ docker compose exec postgres psql -U postgres -d appointments \
 The service logs the payload instead of sending anything:
 
 ```
-NOTIFICATION reminderId=1 appointmentId=1 type=TWENTY_FOUR_HOURS contact=+15550001111 appointmentAt=2026-09-23T11:30:00Z
+NOTIFICATION reminderId=1 appointmentId=1 type=TWENTY_FOUR_HOURS contact=+15****11 appointmentAt=2026-09-23T11:30:00Z
 ```
+
+The contact is masked: enough to tell two customers apart in the logs, not enough to leak one.
 
 And the delivery is on record — one row per reminder, forever:
 
@@ -80,6 +82,11 @@ docker compose exec postgres psql -U postgres -d appointments \
 | `POST /appointments` | Book. Returns 201 with both reminders, or 400 if the slot is in the past or the contact is blank. |
 | `GET /appointments/{id}` | Read one, with its reminders and their current status. 404 if unknown. |
 | `POST /appointments/{id}/cancel` | Cancel, and skip its pending reminders. Idempotent. |
+| `GET /actuator/health` | `UP` when the app and its database are reachable. The only actuator endpoint exposed. |
+
+Errors are [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json`.
+Spring's own errors keep their real status — 405 for a wrong method, 415 for a
+wrong content type, 400 for a non-numeric id — rather than collapsing into 500.
 
 ### Tests
 
@@ -112,6 +119,35 @@ Everything tunable lives under `reminders.*` in `src/main/resources/application.
 Database credentials come from the environment — `DB_URL`, `DB_USERNAME`,
 `DB_PASSWORD`, `DB_POOL_MAX` — defaulting to the docker-compose values so a local
 run needs no setup and no credential is baked into the image.
+
+## What the brief asked for
+
+| Requirement | Where |
+|---|---|
+| `POST /appointments` with a time and a contact | [`AppointmentController`](src/main/java/com/product/appointment/controller/AppointmentController.java), [`AppointmentService`](src/main/java/com/product/appointment/service/AppointmentService.java) |
+| Reminders 24h and 2h before | Written with the appointment in one transaction. Test: `createsOneReminderTwentyFourHoursOutAndOneTwoHoursOut` |
+| Stub sender that logs the payload | [`StubNotificationSender`](src/main/java/com/product/appointment/notification/StubNotificationSender.java) |
+| Never the same reminder twice, provably | `UNIQUE(reminder_id)` on `notification_log`. Tests: `concurrentWorkersCannotNotifyTheSameCustomerTwice`, `databaseRefusesASecondDeliveryOfTheSameReminder`, and 50,000 reminders under four workers in the [benchmark](docs/benchmarks.md). [How it works](docs/design-decisions.md#how-never-twice-works) |
+| 50,000 appointments a day, 500 dealerships | [Measured](docs/benchmarks.md) at ~3,500 reminders/sec; [scaling notes](docs/deployment.md) |
+| Corner cases and failures | [Corner cases](docs/design-decisions.md#corner-cases), each with a test under [`src/test`](src/test/java/com/product/appointment) |
+| Tests | `./mvnw test`, against a real Postgres |
+| How to run, design decisions | This page, [Design Decisions](docs/design-decisions.md) |
+| Design diagram | [Architecture](docs/architecture.md) |
+| Another week | [Roadmap](docs/roadmap.md) |
+| Open questions | Below |
+
+Anyone can check the guarantee against a live database. Both must return no rows:
+
+```sql
+-- No reminder delivered twice
+SELECT reminder_id, count(*) FROM notification_log GROUP BY reminder_id HAVING count(*) > 1;
+-- No appointment with two reminders of the same type
+SELECT appointment_id, reminder_type, count(*) FROM reminders
+GROUP BY appointment_id, reminder_type HAVING count(*) > 1;
+```
+
+They can't return rows: both are backed by unique constraints, and the tests
+show Postgres refusing a raw `INSERT` that bypasses the application entirely.
 
 ## Open questions
 

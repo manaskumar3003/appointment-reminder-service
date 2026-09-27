@@ -35,7 +35,8 @@ public class ReminderWorker {
                 }
             }
         } catch (Exception e) {
-            // An exception escaping @Scheduled cancels the schedule for the life of the JVM.
+            // Spring's default handler would also log and keep the schedule alive; catching here
+            // just makes the failure say what it was and that the next poll retries it.
             log.error("Reminder poll failed; will retry on next interval", e);
         }
     }

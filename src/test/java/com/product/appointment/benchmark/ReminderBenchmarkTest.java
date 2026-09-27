@@ -1,7 +1,8 @@
-package com.product.appointment;
+package com.product.appointment.benchmark;
 
 import com.product.appointment.dto.CreateAppointmentRequest;
 import com.product.appointment.service.AppointmentService;
+import com.product.appointment.support.TestcontainersConfiguration;
 import com.product.appointment.worker.ReminderWorker;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;

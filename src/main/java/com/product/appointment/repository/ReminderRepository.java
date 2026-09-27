@@ -53,6 +53,25 @@ public interface ReminderRepository extends JpaRepository<Reminder, Long> {
     int recoverStaleReminders(@Param("leaseMinutes") int leaseMinutes,
                               @Param("maxAttempts") int maxAttempts);
 
+    /**
+     * Returns a failed reminder to PENDING after the retry delay, or parks it in FAILED once out of
+     * attempts. Guarded on PROCESSING: a worker whose lease expired and whose reminder was since
+     * sent by another worker must not overwrite SENT. Returns 0 when the caller no longer owns it.
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE reminders
+            SET status = CASE WHEN attempt_count >= :maxAttempts THEN 'FAILED' ELSE 'PENDING' END,
+                next_attempt_at = CASE WHEN attempt_count >= :maxAttempts THEN NULL
+                                       ELSE now() + (:retryDelayMinutes * INTERVAL '1 minute') END,
+                processing_started_at = NULL
+            WHERE id = :id
+              AND status = 'PROCESSING'
+            """, nativeQuery = true)
+    int releaseAfterFailure(@Param("id") Long id,
+                            @Param("maxAttempts") int maxAttempts,
+                            @Param("retryDelayMinutes") int retryDelayMinutes);
+
     @Modifying
     @Query(value = """
             UPDATE reminders

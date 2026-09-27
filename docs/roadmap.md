@@ -10,7 +10,7 @@ What another week would add, in the order I'd do it.
 |---|---|---|
 | 🔴 | **Real sender + reconciliation** | The stub hides the hard part — see below |
 | 🔴 | **Idempotency keys on booking** | A double-clicked form books twice today |
-| 🟡 | **Actuator + metrics** | Right now the only monitoring is `SELECT` |
+| 🟡 | **Metrics** | Health is exposed; everything else is still a `SELECT` |
 | 🟡 | **Rescheduling** | Only cancel exists |
 | 🟢 | **Channel-aware sending** | SMS vs email need different validation and senders |
 | 🟢 | **Quiet hours** | A 2h reminder for an 07:00 slot fires at 05:00 |
@@ -43,10 +43,10 @@ header with a unique index, returning the original response on a repeat. Easy to
 build, easy to get subtly wrong, so it needs a concurrent test, not just a
 sequential one.
 
-### 🟡 Actuator + metrics
+### 🟡 Metrics
 
-- Health and readiness endpoints, so an orchestrator knows when the app is *up*
-  rather than merely running.
+- `/actuator/health` is there, with a database check. Next: separate liveness
+  and readiness probes, so a slow start isn't mistaken for a dead instance.
 - Counters for sent / failed / skipped / recovered, and a gauge for the past-due
   backlog. The [alerting queries](deployment.md#when-to-scale-and-what-to-do)
   become dashboards.
