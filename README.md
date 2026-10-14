@@ -25,6 +25,13 @@ Books vehicle service appointments and reminds the customer 24 hours and 2 hours
 > Same commit: `/actuator/health`, raw-SQL tests proving the constraints hold without
 > the application, tests split by layer, and corrected claims about `@Scheduled` and
 > exactly-once delivery.
+>
+> Then, in `de667b0`, closed the gap that note admitted: the send sat inside the commit
+> that recorded it, so a crash between the two re-sent on retry. A send now records
+> `SENDING` first, calls the provider with an idempotency key outside any transaction,
+> then records `SENT`; a reconciler settles anything left unconfirmed. Three new tests;
+> about a third of the drain throughput
+> ([measured](docs/benchmarks.md#since-submission-recording-intent-before-the-send)).
 
 ## How to run
 
