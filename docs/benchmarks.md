@@ -66,6 +66,24 @@ Peak real demand is [~8/sec](deployment.md#the-load). The measured ceiling is
 **400× that**. A full day's 100,000 reminders, if they all came due at the same
 instant, clear in about **30 seconds**.
 
+### Since submission: recording intent before the send
+
+A send is now three short transactions instead of one — record `SENDING`, call
+the provider, record `SENT` ([why](design-decisions.md#how-never-twice-works)).
+Measured back to back on the same machine, three runs each:
+
+| Version | 50,000 reminders drained in | Throughput |
+|---|---|---|
+| Submitted (`43d5790`) | 44.9s · 45.3s · 46.3s | ~1,100/sec |
+| Intent + reconcile | 69.8s · 72.5s · 70.5s | ~705/sec |
+
+**About a third slower.** The absolute numbers are lower than the table above
+because this machine was slower on the day — booking, which didn't change, also
+measured ~2,000/sec instead of ~9,000 — so compare the two rows with each other,
+not with the earlier run. Against the ~8/sec peak, ~705/sec is still **~88×
+headroom**; a whole day's 100,000 reminders due at once would clear in under
+three minutes. Every run still asserted exactly 50,000 deliveries.
+
 ## Booking
 
 2,000 appointments (4,000 reminder rows) through `AppointmentService`, 8 threads:
@@ -85,7 +103,7 @@ will do 3,500/sec in production:
 
 - **Real sending is a network call.** An SMS provider takes 50–500ms and rate
   limits you. That, not Postgres, sets real throughput — and it's why the worker
-  sends one reminder per transaction instead of batching.
+  sends one reminder at a time, with no transaction open during the call.
 - **Database is on the same host here.** A managed Postgres across an AZ adds
   ~1ms per round trip, several times per reminder. Expect the number to drop a
   lot; it has 400× of room to drop into.

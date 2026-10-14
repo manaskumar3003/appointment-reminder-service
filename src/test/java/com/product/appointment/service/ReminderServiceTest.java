@@ -1,5 +1,7 @@
 package com.product.appointment.service;
 
+import com.product.appointment.entity.DeliveryStatus;
+import com.product.appointment.entity.NotificationLog;
 import com.product.appointment.entity.Reminder;
 import com.product.appointment.entity.ReminderStatus;
 import com.product.appointment.support.IntegrationTest;
@@ -66,6 +68,39 @@ class ReminderServiceTest extends IntegrationTest {
         assertThat(after.getStatus()).isEqualTo(ReminderStatus.SENT);
         assertThat(after.getNextAttemptAt()).isNull();
         assertThat(notificationLogRepository.count()).isEqualTo(1);
+    }
+
+    /** Parked FAILED with a send still unconfirmed, but the provider has it: it was delivered. */
+    @Test
+    void unconfirmedSendTheProviderHasIsReconciledAsSent() {
+        Reminder parked = dueReminder();
+        parked.setStatus(ReminderStatus.FAILED);
+        reminderRepository.saveAndFlush(parked);
+        unconfirmedSend(parked);
+        String delivered = notificationSender.send(
+                reminderRepository.findByIdWithAppointment(parked.getId()).orElseThrow(),
+                NotificationLog.idempotencyKey(parked.getId()));
+
+        reminderService.reconcileUnconfirmed();
+
+        NotificationLog entry = notificationLogRepository.findByReminderId(parked.getId()).orElseThrow();
+        assertThat(entry.getStatus()).isEqualTo(DeliveryStatus.SENT);
+        assertThat(entry.getProviderMessageId()).isEqualTo(delivered);
+        assertThat(statusOf(parked)).isEqualTo(ReminderStatus.SENT);
+    }
+
+    /** Parked FAILED with a send still unconfirmed, and the provider never got it: nothing went out. */
+    @Test
+    void unconfirmedSendTheProviderNeverReceivedIsCleared() {
+        Reminder parked = dueReminder();
+        parked.setStatus(ReminderStatus.FAILED);
+        reminderRepository.saveAndFlush(parked);
+        unconfirmedSend(parked);
+
+        reminderService.reconcileUnconfirmed();
+
+        assertThat(notificationLogRepository.count()).isZero();
+        assertThat(statusOf(parked)).isEqualTo(ReminderStatus.FAILED);
     }
 
     /** A reminder that kills its worker rather than throwing must still hit the cap. */

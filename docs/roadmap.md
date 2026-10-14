@@ -8,7 +8,7 @@ What another week would add, in the order I'd do it.
 
 | | What | Why it matters |
 |---|---|---|
-| 🔴 | **Real sender + reconciliation** | The stub hides the hard part — see below |
+| 🔴 | **Real sender** | Intent + reconciliation are in; a real provider isn't — see below |
 | 🔴 | **Idempotency keys on booking** | A double-clicked form books twice today |
 | 🟡 | **Metrics** | Health is exposed; everything else is still a `SELECT` |
 | 🟡 | **Rescheduling** | Only cancel exists |
@@ -19,22 +19,24 @@ What another week would add, in the order I'd do it.
 
 ---
 
-### 🔴 Real sender + reconciliation
+### 🔴 Real sender
 
-**The biggest gap between this and production.** Today "sending" is a log line
-printed inside the transaction that records `SENT`. A crash between the two
-repeats a log line — harmless for a stub. A real provider makes the same window
-a real duplicate: the HTTP call can succeed and the transaction recording it can
-still fail. Exactly-once isn't possible, so the question becomes *which way to
-be wrong*.
+**Done since submission:** intent before the call. `notification_log` has a
+status of its own (`SENDING` → `SENT`) and a `provider_message_id`; the row is
+committed before the provider is called with an idempotency key, and a
+reconciler asks the provider about anything left in limbo. See
+[How "never twice" works](design-decisions.md#how-never-twice-works).
 
-The fix: record intent before the call. `notification_log` gains a
-`provider_message_id` and a status of its own, the row is written before the
-provider is called, and a reconciliation job asks the provider about anything
-left in limbo. Duplicates become *detectable* rather than merely prevented.
+**Still the biggest gap between this and production:** a real provider.
 
-Out of scope for a brief that says "log the payload", but it's the first thing
-I'd build next.
+- An HTTP client with timeouts, and errors sorted by what they mean: a
+  permanent 4xx goes straight to `FAILED`, a 429 or 5xx backs off, and a
+  **timeout** is ambiguous — it stays `SENDING` for the reconciler rather than
+  being blindly retried.
+- A provider that honours idempotency keys on its side. The stub keeps them in
+  memory, so they don't survive its restart.
+- Delivery-receipt webhooks, so "accepted by the provider" can become
+  "delivered to the phone".
 
 ### 🔴 Idempotency keys on booking
 

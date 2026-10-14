@@ -31,11 +31,20 @@ Three layers, and only the last one is the real proof:
 
 That insert lives in `ReminderService`, not inside the stub sender, so the guarantee belongs to the service — a real SMS sender dropped in later can't forget it.
 
-Two details that matter:
+A send is three commits, not one:
 
-- The log row and the `SENT` status commit **together**, so there's no crash window where a reminder is marked sent with no record, or recorded with no mark.
-- What the database guarantees is **at most one recorded delivery**. The send itself is **at-least-once**: it happens before the commit, so a crash between the two rolls the log row back and the reminder is retried and sent again. That holds for the stub too — its log line is printed before the commit. The window is milliseconds wide and needs a crash inside it, but no design can make an external send and a database commit one atomic step. Closing it means committing the decision to send *before* sending, and flagging anything left unconfirmed rather than retrying it — see [Roadmap](roadmap.md#-real-sender--reconciliation).
-- If two workers somehow race — a send outlived its lease and the reminder was reclaimed — the loser's insert waits on the winner's, then breaks the constraint and rolls back before it reaches the sender. Its failure is recorded with a conditional `UPDATE … WHERE status = 'PROCESSING'`, so it can't overwrite the winner's `SENT`. One notification, and the status stays true.
+1. The `notification_log` row is written `SENDING` and committed — the intent is on record before anything leaves.
+2. The provider is called with an idempotency key, `reminder-<id>`, and **no transaction open**, so a slow provider can't hold a pooled connection or a row lock.
+3. The row becomes `SENT` with the provider's message id, in the same commit as the reminder's `SENT`.
+
+Why: no design can make an external send and a database commit one atomic step. In the submitted version the send sat inside the commit, so a crash between them rolled the record back and the retry sent again. Now that crash leaves a visible `SENDING` row, and the retry sends under the **same key** — a provider that honours idempotency keys hands back the original message instead of delivering a second.
+
+Details that matter:
+
+- The stub honours keys but keeps them in memory, so its own restart forgets them. A real provider keeps them on its side, which is what makes a retry after *our* crash safe — see [Roadmap](roadmap.md#-real-sender).
+- A `SENDING` row whose reminder will never be retried — it ended `FAILED` or `SKIPPED` — is settled by the reconciler on each poll: it asks the provider, records `SENT` if the message went, and clears the intent if it didn't.
+- If two workers race — a send outlived its lease and the reminder was reclaimed — the second worker finds the `SENDING` row and sends under the same key, so the provider delivers once. A late failure from either is recorded with a conditional `UPDATE … WHERE status = 'PROCESSING'`, so it can't overwrite `SENT`.
+- The cost is three short transactions per reminder instead of one — see [Benchmarks](benchmarks.md).
 
 Proven by `NoDuplicateReminderTest.concurrentWorkersCannotNotifyTheSameCustomerTwice` — eight workers, twenty due reminders, batch size pinned to 1 so they actually fight over them. All twenty sent, none twice.
 

@@ -51,7 +51,10 @@ erDiagram
     notification_log {
         bigserial id PK
         bigint reminder_id FK "UNIQUE"
-        timestamptz sent_at
+        varchar status "SENDING | SENT"
+        varchar provider_message_id
+        timestamptz created_at "intent recorded"
+        timestamptz sent_at "provider accepted"
     }
 ```
 
@@ -70,7 +73,7 @@ stateDiagram-v2
     [*] --> SKIPPED: booked, send time already passed
 
     PENDING --> PROCESSING: claimed by a worker
-    PROCESSING --> SENT: logged + notification_log row committed
+    PROCESSING --> SENT: SENDING row, provider call, SENT committed
     PROCESSING --> PENDING: send failed, attempts left
     PROCESSING --> PENDING: lease expired (worker died)
     PROCESSING --> FAILED: send failed, attempts exhausted
@@ -98,6 +101,10 @@ sequenceDiagram
     W->>S: recoverStaleReminders()
     S->>DB: PROCESSING older than lease → PENDING
 
+    W->>S: reconcileUnconfirmed()
+    S->>N: findSent(key) for SENDING rows no retry will revisit
+    S->>DB: SENT if the provider has it, else clear the intent
+
     W->>S: claimBatch()
     Note over S,DB: tx 1 — the claim
     S->>DB: UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)
@@ -106,13 +113,14 @@ sequenceDiagram
 
     loop each claimed id
         W->>S: sendClaimed(id)
-        Note over S,DB: tx 2 — one per reminder
+        Note over S,DB: tx 2 — record the intent
         S->>S: cancelled? already started? → SKIPPED
-        S->>DB: INSERT notification_log (UNIQUE reminder_id)
-        S->>N: send(reminder)
-        N-->>N: log payload
-        S->>DB: reminder → SENT
-        Note over S,DB: log row and SENT commit together
+        S->>DB: INSERT notification_log SENDING (UNIQUE reminder_id)
+        Note over S,N: no transaction open
+        S->>N: send(reminder, key = reminder-ID)
+        N-->>S: message id (the original one for a repeated key)
+        Note over S,DB: tx 3 — record the answer
+        S->>DB: log row → SENT + message id, reminder → SENT
     end
 ```
 
@@ -130,4 +138,6 @@ The claim commits **before** any sending. Two reasons, both load-bearing:
 
 The loop lives in the worker rather than the service because each step must be
 its own transaction, and a service calling its own methods bypasses the Spring
-proxy — `@Transactional` would silently do nothing.
+proxy — `@Transactional` would silently do nothing. Inside `sendClaimed` the
+two transactions around the provider call use a `TransactionTemplate` for the
+same reason.

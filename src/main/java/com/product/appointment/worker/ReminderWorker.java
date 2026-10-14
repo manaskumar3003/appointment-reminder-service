@@ -25,6 +25,7 @@ public class ReminderWorker {
     public void processReminders() {
         try {
             reminderService.recoverStaleReminders();
+            reminderService.reconcileUnconfirmed();
 
             List<Long> claimed = reminderService.claimBatch();
             for (Long id : claimed) {

@@ -1,6 +1,7 @@
 package com.product.appointment.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.OffsetDateTime;
 
@@ -14,7 +15,11 @@ import java.time.OffsetDateTime;
                 )
         }
 )
-/** One row per delivered reminder. UNIQUE(reminder_id) is the "never twice" guarantee. */
+/**
+ * One row per reminder handed to the provider. UNIQUE(reminder_id) is the "never twice" guarantee.
+ * Written SENDING before the provider is called and SENT once it answers, so a crash in between
+ * leaves a row saying so.
+ */
 public class NotificationLog {
 
     @Id
@@ -24,8 +29,25 @@ public class NotificationLog {
     @Column(name = "reminder_id", nullable = false)
     private Long reminderId;
 
-    @Column(name = "sent_at", nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private DeliveryStatus status;
+
+    @Column(name = "provider_message_id")
+    private String providerMessageId;
+
+    /** When the provider accepted it; null while SENDING. */
+    @Column(name = "sent_at")
     private OffsetDateTime sentAt;
+
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private OffsetDateTime createdAt;
+
+    /** One key per reminder, so every retry of it is the same request as far as the provider knows. */
+    public static String idempotencyKey(Long reminderId) {
+        return "reminder-" + reminderId;
+    }
 
     public Long getId() {
         return id;
@@ -39,11 +61,23 @@ public class NotificationLog {
         this.reminderId = reminderId;
     }
 
+    public DeliveryStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(DeliveryStatus status) {
+        this.status = status;
+    }
+
+    public String getProviderMessageId() {
+        return providerMessageId;
+    }
+
     public OffsetDateTime getSentAt() {
         return sentAt;
     }
 
-    public void setSentAt(OffsetDateTime sentAt) {
-        this.sentAt = sentAt;
+    public OffsetDateTime getCreatedAt() {
+        return createdAt;
     }
 }

@@ -5,6 +5,7 @@ import com.product.appointment.entity.AppointmentStatus;
 import com.product.appointment.entity.Reminder;
 import com.product.appointment.entity.ReminderStatus;
 import com.product.appointment.entity.ReminderType;
+import com.product.appointment.notification.NotificationSender;
 import com.product.appointment.repository.AppointmentRepository;
 import com.product.appointment.repository.NotificationLogRepository;
 import com.product.appointment.repository.ReminderRepository;
@@ -44,6 +45,7 @@ public abstract class IntegrationTest {
     @Autowired protected NotificationLogRepository notificationLogRepository;
     @Autowired protected ReminderService reminderService;
     @Autowired protected ReminderWorker worker;
+    @Autowired protected NotificationSender notificationSender;
     @Autowired protected JdbcTemplate jdbc;
 
     @BeforeEach
@@ -77,6 +79,14 @@ public abstract class IntegrationTest {
         reminder.setProcessingStartedAt(OffsetDateTime.now());
         reminder.setAttemptCount(attemptCount);
         return reminderRepository.saveAndFlush(reminder);
+    }
+
+    /** What a crash after recording the intent leaves behind: a SENDING row, an hour old. */
+    protected void unconfirmedSend(Reminder reminder) {
+        jdbc.update("""
+                INSERT INTO notification_log (reminder_id, status, created_at)
+                VALUES (?, 'SENDING', now() - interval '1 hour')
+                """, reminder.getId());
     }
 
     protected ReminderStatus statusOf(Reminder reminder) {

@@ -77,7 +77,7 @@ docker compose exec postgres psql -U postgres -d appointments \
 The service logs the payload instead of sending anything:
 
 ```
-NOTIFICATION reminderId=1 appointmentId=1 type=TWENTY_FOUR_HOURS contact=+15****11 appointmentAt=2026-09-23T11:30:00Z
+NOTIFICATION reminderId=1 appointmentId=1 type=TWENTY_FOUR_HOURS contact=+15****11 appointmentAt=2026-09-23T11:30:00Z messageId=stub-3f9c…
 ```
 
 The contact is masked: enough to tell two customers apart in the logs, not enough to leak one.
@@ -142,7 +142,7 @@ run needs no setup and no credential is baked into the image.
 | Reminders 24h and 2h before | Written with the appointment in one transaction. Test: `createsOneReminderTwentyFourHoursOutAndOneTwoHoursOut` |
 | Stub sender that logs the payload | [`StubNotificationSender`](src/main/java/com/product/appointment/notification/StubNotificationSender.java) |
 | Never the same reminder twice, provably | `UNIQUE(reminder_id)` on `notification_log`. Tests: `concurrentWorkersCannotNotifyTheSameCustomerTwice`, `databaseRefusesASecondDeliveryOfTheSameReminder`, and 50,000 reminders under four workers in the [benchmark](docs/benchmarks.md). [How it works](docs/design-decisions.md#how-never-twice-works) |
-| 50,000 appointments a day, 500 dealerships | [Measured](docs/benchmarks.md) at ~3,500 reminders/sec; [scaling notes](docs/deployment.md) |
+| 50,000 appointments a day, 500 dealerships | [Measured](docs/benchmarks.md) at ~3,500 reminders/sec as submitted, about a third less since the send records its intent first; [scaling notes](docs/deployment.md) |
 | Corner cases and failures | [Corner cases](docs/design-decisions.md#corner-cases), tested under [`src/test`](src/test/java/com/product/appointment) — except clock drift, graceful shutdown and a poll that throws, which are handled by design but not tested |
 | Tests | `./mvnw test`, against a real Postgres |
 | How to run, design decisions | This page, [Design Decisions](docs/design-decisions.md) |

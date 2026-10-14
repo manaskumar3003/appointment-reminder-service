@@ -50,9 +50,9 @@ class NoDuplicateReminderTest extends IntegrationTest {
     @Test
     void databaseRefusesASecondDeliveryOfTheSameReminder() {
         Long id = dueReminder().getId();
-        jdbc.update("INSERT INTO notification_log (reminder_id) VALUES (?)", id);
+        jdbc.update("INSERT INTO notification_log (reminder_id, status) VALUES (?, 'SENT')", id);
 
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO notification_log (reminder_id) VALUES (?)", id))
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO notification_log (reminder_id, status) VALUES (?, 'SENT')", id))
                 .isInstanceOf(DuplicateKeyException.class);
         assertThat(notificationLogRepository.count()).isEqualTo(1);
     }

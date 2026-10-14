@@ -2,6 +2,8 @@ package com.product.appointment.worker;
 
 import com.product.appointment.entity.Appointment;
 import com.product.appointment.entity.AppointmentStatus;
+import com.product.appointment.entity.DeliveryStatus;
+import com.product.appointment.entity.NotificationLog;
 import com.product.appointment.entity.Reminder;
 import com.product.appointment.entity.ReminderStatus;
 import com.product.appointment.entity.ReminderType;
@@ -42,6 +44,31 @@ class ReminderWorkerTest extends IntegrationTest {
 
         assertThat(statusOf(stranded)).isEqualTo(ReminderStatus.SENT);
         assertThat(notificationLogRepository.count()).isEqualTo(1);
+    }
+
+    /**
+     * The worker died after the provider took the message but before SENT was committed. The retry
+     * sends under the same idempotency key, so the provider hands back the original message
+     * instead of delivering a second one.
+     */
+    @Test
+    void sendInterruptedBeforeItWasConfirmedIsNotDeliveredTwice() {
+        Reminder stranded = dueReminder();
+        stranded.setStatus(ReminderStatus.PROCESSING);
+        stranded.setProcessingStartedAt(OffsetDateTime.now().minusHours(1));
+        stranded.setAttemptCount(1);
+        reminderRepository.saveAndFlush(stranded);
+        unconfirmedSend(stranded);
+        String delivered = notificationSender.send(
+                reminderRepository.findByIdWithAppointment(stranded.getId()).orElseThrow(),
+                NotificationLog.idempotencyKey(stranded.getId()));
+
+        worker.processReminders();
+
+        NotificationLog entry = notificationLogRepository.findByReminderId(stranded.getId()).orElseThrow();
+        assertThat(entry.getStatus()).isEqualTo(DeliveryStatus.SENT);
+        assertThat(entry.getProviderMessageId()).isEqualTo(delivered);
+        assertThat(statusOf(stranded)).isEqualTo(ReminderStatus.SENT);
     }
 
     /** After an outage the backlog holds reminders for appointments that already happened. */

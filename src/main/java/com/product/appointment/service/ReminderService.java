@@ -2,6 +2,7 @@ package com.product.appointment.service;
 
 import com.product.appointment.entity.Appointment;
 import com.product.appointment.entity.AppointmentStatus;
+import com.product.appointment.entity.DeliveryStatus;
 import com.product.appointment.entity.NotificationLog;
 import com.product.appointment.entity.Reminder;
 import com.product.appointment.entity.ReminderStatus;
@@ -13,9 +14,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class ReminderService {
@@ -25,6 +28,7 @@ public class ReminderService {
     private final ReminderRepository reminderRepository;
     private final NotificationLogRepository notificationLogRepository;
     private final NotificationSender notificationSender;
+    private final TransactionTemplate transactionTemplate;
     private final int batchSize;
     private final int maxAttempts;
     private final int leaseMinutes;
@@ -33,6 +37,7 @@ public class ReminderService {
     public ReminderService(ReminderRepository reminderRepository,
                            NotificationLogRepository notificationLogRepository,
                            NotificationSender notificationSender,
+                           TransactionTemplate transactionTemplate,
                            @Value("${reminders.batch-size:500}") int batchSize,
                            @Value("${reminders.max-attempts:3}") int maxAttempts,
                            @Value("${reminders.lease-minutes:5}") int leaseMinutes,
@@ -40,6 +45,7 @@ public class ReminderService {
         this.reminderRepository = reminderRepository;
         this.notificationLogRepository = notificationLogRepository;
         this.notificationSender = notificationSender;
+        this.transactionTemplate = transactionTemplate;
         this.batchSize = batchSize;
         this.maxAttempts = maxAttempts;
         this.leaseMinutes = leaseMinutes;
@@ -52,9 +58,30 @@ public class ReminderService {
         return reminderRepository.claimDueReminders(batchSize);
     }
 
-    /** One transaction per reminder, and the log insert lives here so no sender can forget it. */
-    @Transactional
+    /**
+     * Three steps, each committed: record the intent, call the provider, record its answer. A crash
+     * between the call and the answer leaves a SENDING row instead of no trace, and the retry sends
+     * under the same idempotency key, so the provider returns the original message.
+     *
+     * The provider call runs outside any transaction - a slow provider would otherwise hold a pooled
+     * connection and the reminder's row lock for the length of every call.
+     */
     public void sendClaimed(Long reminderId) {
+        Delivery delivery = transactionTemplate.execute(status -> recordIntent(reminderId));
+        if (delivery == null) {
+            return;
+        }
+
+        String providerMessageId = notificationSender.send(delivery.reminder(), delivery.idempotencyKey());
+
+        transactionTemplate.executeWithoutResult(status -> confirm(reminderId, providerMessageId));
+    }
+
+    private record Delivery(Reminder reminder, String idempotencyKey) {
+    }
+
+    /** Null when there is nothing to send: the reminder went stale, or an earlier send was confirmed. */
+    private Delivery recordIntent(Long reminderId) {
 
         Reminder reminder = reminderRepository.findByIdWithAppointment(reminderId).orElseThrow();
 
@@ -63,20 +90,35 @@ public class ReminderService {
             reminder.setStatus(ReminderStatus.SKIPPED);
             reminder.setProcessingStartedAt(null);
             log.info("Skipping reminder {}: {}", reminderId, stale);
-            return;
+            return null;
         }
 
-        if (notificationLogRepository.existsByReminderId(reminderId)) {
+        Optional<NotificationLog> earlier = notificationLogRepository.findByReminderId(reminderId);
+        if (earlier.isPresent() && earlier.get().getStatus() == DeliveryStatus.SENT) {
             log.info("Reminder {} already notified; not re-sending", reminderId);
-        } else {
-            NotificationLog entry = new NotificationLog();
-            entry.setReminderId(reminderId);
-            entry.setSentAt(OffsetDateTime.now());
-            // UNIQUE(reminder_id) refuses a second delivery; the check above is only a fast path.
-            notificationLogRepository.saveAndFlush(entry);
-            notificationSender.send(reminder);
+            markSent(reminder);
+            return null;
         }
 
+        if (earlier.isPresent()) {
+            log.info("Reminder {} has an unconfirmed send; retrying under the same idempotency key", reminderId);
+        } else {
+            NotificationLog intent = new NotificationLog();
+            intent.setReminderId(reminderId);
+            intent.setStatus(DeliveryStatus.SENDING);
+            // UNIQUE(reminder_id) refuses a second intent; the lookup above is only a fast path.
+            notificationLogRepository.saveAndFlush(intent);
+        }
+        return new Delivery(reminder, NotificationLog.idempotencyKey(reminderId));
+    }
+
+    /** The provider took it, so the reminder is SENT - even if it was parked meanwhile. */
+    private void confirm(Long reminderId, String providerMessageId) {
+        notificationLogRepository.markSent(reminderId, providerMessageId);
+        markSent(reminderRepository.findById(reminderId).orElseThrow());
+    }
+
+    private static void markSent(Reminder reminder) {
         reminder.setStatus(ReminderStatus.SENT);
         reminder.setSentAt(OffsetDateTime.now());
         reminder.setProcessingStartedAt(null);
@@ -94,7 +136,8 @@ public class ReminderService {
     }
 
     /**
-     * Fresh transaction - the failed send's transaction is already rolled back.
+     * Fresh transaction - the failed step's transaction is already rolled back. Any SENDING row
+     * stays, so the retry reuses its idempotency key.
      *
      * One conditional UPDATE rather than read-then-write: a worker that lost a lease race fails on
      * the notification_log constraint after the winner committed SENT, and must not undo that.
@@ -123,5 +166,34 @@ public class ReminderService {
             log.info("Recovered {} reminders stranded in PROCESSING", recovered);
         }
         return recovered;
+    }
+
+    /**
+     * Settles unconfirmed sends that no retry will revisit, by asking the provider. It has the
+     * message: it was delivered, so record SENT. It doesn't: nothing went out, so clear the intent.
+     * A provider that can't answer is asked again on the next poll.
+     */
+    public int reconcileUnconfirmed() {
+        int settled = 0;
+        for (NotificationLog entry : notificationLogRepository.findUnconfirmed(leaseMinutes, batchSize)) {
+            Long reminderId = entry.getReminderId();
+            try {
+                Optional<String> providerMessageId =
+                        notificationSender.findSent(NotificationLog.idempotencyKey(reminderId));
+                transactionTemplate.executeWithoutResult(status -> {
+                    if (providerMessageId.isPresent()) {
+                        log.info("Reminder {} was delivered before it was confirmed; marking SENT", reminderId);
+                        confirm(reminderId, providerMessageId.get());
+                    } else {
+                        log.info("Reminder {} never reached the provider; clearing its unconfirmed send", reminderId);
+                        notificationLogRepository.deleteUnconfirmed(reminderId);
+                    }
+                });
+                settled++;
+            } catch (Exception e) {
+                log.warn("Could not reconcile reminder {}; will ask again next poll", reminderId, e);
+            }
+        }
+        return settled;
     }
 }
