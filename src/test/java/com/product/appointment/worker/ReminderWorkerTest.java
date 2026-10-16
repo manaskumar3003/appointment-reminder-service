@@ -7,6 +7,7 @@ import com.product.appointment.entity.NotificationLog;
 import com.product.appointment.entity.Reminder;
 import com.product.appointment.entity.ReminderStatus;
 import com.product.appointment.entity.ReminderType;
+import com.product.appointment.notification.SendResult;
 import com.product.appointment.support.IntegrationTest;
 import org.junit.jupiter.api.Test;
 
@@ -48,8 +49,7 @@ class ReminderWorkerTest extends IntegrationTest {
 
     /**
      * The worker died after the provider took the message but before SENT was committed. The retry
-     * sends under the same idempotency key, so the provider hands back the original message
-     * instead of delivering a second one.
+     * probes first, finds the provider already has it, and records SENT without sending again.
      */
     @Test
     void sendInterruptedBeforeItWasConfirmedIsNotDeliveredTwice() {
@@ -59,9 +59,9 @@ class ReminderWorkerTest extends IntegrationTest {
         stranded.setAttemptCount(1);
         reminderRepository.saveAndFlush(stranded);
         unconfirmedSend(stranded);
-        String delivered = notificationSender.send(
+        String delivered = ((SendResult.Accepted) notificationSender.send(
                 reminderRepository.findByIdWithAppointment(stranded.getId()).orElseThrow(),
-                NotificationLog.idempotencyKey(stranded.getId()));
+                NotificationLog.idempotencyKey(stranded.getId()))).providerMessageId();
 
         worker.processReminders();
 
@@ -103,7 +103,7 @@ class ReminderWorkerTest extends IntegrationTest {
     void failedReminderIsHeldBackUntilTheRetryDelayHasElapsed() {
         Reminder due = claimed(dueReminder(), 1);
 
-        reminderService.recordFailure(due.getId(), new RuntimeException("provider down"));
+        reminderService.recordFailure(claimOf(due), new RuntimeException("provider down"));
 
         Reminder afterFailure = reminderRepository.findById(due.getId()).orElseThrow();
         assertThat(afterFailure.getStatus()).isEqualTo(ReminderStatus.PENDING);

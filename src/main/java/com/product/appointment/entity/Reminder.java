@@ -51,12 +51,24 @@ public class Reminder {
     @Column(name = "sent_at")
     private OffsetDateTime sentAt;
 
+    /** Fencing token of the current claim; outcome writes only land while it still matches. */
+    @Column(name = "claim_token", length = 36)
+    private String claimToken;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
     public Long getId() {
         return id;
+    }
+
+    public String getClaimToken() {
+        return claimToken;
+    }
+
+    public void setClaimToken(String claimToken) {
+        this.claimToken = claimToken;
     }
 
     public Appointment getAppointment() {

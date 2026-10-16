@@ -4,6 +4,7 @@ import com.product.appointment.entity.DeliveryStatus;
 import com.product.appointment.entity.NotificationLog;
 import com.product.appointment.entity.Reminder;
 import com.product.appointment.entity.ReminderStatus;
+import com.product.appointment.notification.SendResult;
 import com.product.appointment.support.IntegrationTest;
 import org.junit.jupiter.api.Test;
 
@@ -13,18 +14,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** Each ReminderService step on its own: send, record a failure, recover a stale lease. */
+/** Each ReminderService step on its own: send, record a failure, recover a stale lease, reconcile. */
 class ReminderServiceTest extends IntegrationTest {
 
     /** Sending the same claimed reminder twice is a no-op, not a second notification. */
     @Test
     void sendingAnAlreadySentReminderIsIdempotent() {
-        Reminder due = dueReminder();
+        Reminder due = claimed(dueReminder(), 1);
 
-        reminderService.sendClaimed(due.getId());
-        reminderService.sendClaimed(due.getId());
+        reminderService.sendClaimed(claimOf(due));
+        reminderService.sendClaimed(claimOf(due));
 
         assertThat(notificationLogRepository.count()).isEqualTo(1);
+        assertThat(statusOf(due)).isEqualTo(ReminderStatus.SENT);
     }
 
     /** Cancellation only touches PENDING rows - an already-claimed one must still stop. */
@@ -35,7 +37,7 @@ class ReminderServiceTest extends IntegrationTest {
         mockMvc.perform(post("/appointments/{id}/cancel", claimed.getAppointment().getId()))
                 .andExpect(status().isOk());
 
-        reminderService.sendClaimed(claimed.getId());
+        reminderService.sendClaimed(claimOf(claimed));
 
         assertThat(notificationLogRepository.count()).isZero();
         assertThat(statusOf(claimed)).isEqualTo(ReminderStatus.SKIPPED);
@@ -45,7 +47,7 @@ class ReminderServiceTest extends IntegrationTest {
     void reminderOutOfAttemptsIsFailedRatherThanRetried() {
         Reminder spent = claimed(dueReminder(), 3);
 
-        reminderService.recordFailure(spent.getId(), new RuntimeException("provider down"));
+        reminderService.recordFailure(claimOf(spent), new RuntimeException("provider down"));
 
         Reminder after = reminderRepository.findById(spent.getId()).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(ReminderStatus.FAILED);
@@ -60,14 +62,31 @@ class ReminderServiceTest extends IntegrationTest {
     @Test
     void failureReportedAfterAnotherWorkerSentTheReminderDoesNotUndoIt() {
         Reminder due = claimed(dueReminder(), 3);
-        reminderService.sendClaimed(due.getId());
+        reminderService.sendClaimed(claimOf(due));
 
-        reminderService.recordFailure(due.getId(), new RuntimeException("duplicate key"));
+        reminderService.recordFailure(claimOf(due), new RuntimeException("duplicate key"));
 
         Reminder after = reminderRepository.findById(due.getId()).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(ReminderStatus.SENT);
         assertThat(after.getNextAttemptAt()).isNull();
         assertThat(notificationLogRepository.count()).isEqualTo(1);
+    }
+
+    /**
+     * Fencing: worker A's lease expired and worker B reclaimed the reminder. A's late failure must
+     * not reset B's claim - a status check alone can't tell them apart (both are PROCESSING).
+     */
+    @Test
+    void staleWorkersFailureCannotResetANewerClaim() {
+        Reminder reminder = claimed(dueReminder(), 1);
+        ReminderService.Claim workerA = claimOf(reminder);
+        Reminder reclaimedByB = claimed(reminderRepository.findById(reminder.getId()).orElseThrow(), 2);
+
+        reminderService.recordFailure(workerA, new RuntimeException("A timed out"));
+
+        Reminder after = reminderRepository.findById(reminder.getId()).orElseThrow();
+        assertThat(after.getStatus()).isEqualTo(ReminderStatus.PROCESSING);
+        assertThat(after.getClaimToken()).isEqualTo(reclaimedByB.getClaimToken());
     }
 
     /** Parked FAILED with a send still unconfirmed, but the provider has it: it was delivered. */
@@ -77,29 +96,29 @@ class ReminderServiceTest extends IntegrationTest {
         parked.setStatus(ReminderStatus.FAILED);
         reminderRepository.saveAndFlush(parked);
         unconfirmedSend(parked);
-        String delivered = notificationSender.send(
+        SendResult.Accepted delivered = (SendResult.Accepted) notificationSender.send(
                 reminderRepository.findByIdWithAppointment(parked.getId()).orElseThrow(),
                 NotificationLog.idempotencyKey(parked.getId()));
 
-        reminderService.reconcileUnconfirmed();
+        deliveryFeedbackService.reconcileUnconfirmed();
 
-        NotificationLog entry = notificationLogRepository.findByReminderId(parked.getId()).orElseThrow();
+        NotificationLog entry = logOf(parked);
         assertThat(entry.getStatus()).isEqualTo(DeliveryStatus.SENT);
-        assertThat(entry.getProviderMessageId()).isEqualTo(delivered);
+        assertThat(entry.getProviderMessageId()).isEqualTo(delivered.providerMessageId());
         assertThat(statusOf(parked)).isEqualTo(ReminderStatus.SENT);
     }
 
     /** Parked FAILED with a send still unconfirmed, and the provider never got it: nothing went out. */
     @Test
-    void unconfirmedSendTheProviderNeverReceivedIsCleared() {
+    void unconfirmedSendTheProviderNeverReceivedIsMarkedNotDelivered() {
         Reminder parked = dueReminder();
         parked.setStatus(ReminderStatus.FAILED);
         reminderRepository.saveAndFlush(parked);
         unconfirmedSend(parked);
 
-        reminderService.reconcileUnconfirmed();
+        deliveryFeedbackService.reconcileUnconfirmed();
 
-        assertThat(notificationLogRepository.count()).isZero();
+        assertThat(logOf(parked).getStatus()).isEqualTo(DeliveryStatus.FAILED);
         assertThat(statusOf(parked)).isEqualTo(ReminderStatus.FAILED);
     }
 

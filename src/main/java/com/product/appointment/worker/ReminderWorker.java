@@ -1,5 +1,6 @@
 package com.product.appointment.worker;
 
+import com.product.appointment.service.DeliveryFeedbackService;
 import com.product.appointment.service.ReminderService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,25 +15,27 @@ public class ReminderWorker {
     private static final Logger log = LoggerFactory.getLogger(ReminderWorker.class);
 
     private final ReminderService reminderService;
+    private final DeliveryFeedbackService deliveryFeedbackService;
 
-    public ReminderWorker(ReminderService reminderService) {
+    public ReminderWorker(ReminderService reminderService, DeliveryFeedbackService deliveryFeedbackService) {
         this.reminderService = reminderService;
+        this.deliveryFeedbackService = deliveryFeedbackService;
     }
 
     /** Loop is here, not in the service: self-invocation would bypass the proxy and drop @Transactional. */
-    @Scheduled(fixedDelayString = "${reminders.poll-interval-ms:15000}",
+    @Scheduled(fixedDelayString = "${reminders.poll-interval-ms:5000}",
                initialDelayString = "${reminders.initial-delay-ms:0}")
     public void processReminders() {
         try {
             reminderService.recoverStaleReminders();
-            reminderService.reconcileUnconfirmed();
+            deliveryFeedbackService.reconcileUnconfirmed();
 
-            List<Long> claimed = reminderService.claimBatch();
-            for (Long id : claimed) {
+            List<ReminderService.Claim> claimed = reminderService.claimBatch();
+            for (ReminderService.Claim claim : claimed) {
                 try {
-                    reminderService.sendClaimed(id);
+                    reminderService.sendClaimed(claim);
                 } catch (Exception e) {
-                    reminderService.recordFailure(id, e);
+                    reminderService.recordFailure(claim, e);
                 }
             }
         } catch (Exception e) {

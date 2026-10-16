@@ -18,13 +18,17 @@ public interface ReminderRepository extends JpaRepository<Reminder, Long> {
     @Query("SELECT r FROM Reminder r JOIN FETCH r.appointment WHERE r.id = :id")
     Optional<Reminder> findByIdWithAppointment(@Param("id") Long id);
 
-    /** Claims and marks PROCESSING in one statement; SKIP LOCKED keeps concurrent workers disjoint. */
+    /**
+     * Claims and marks PROCESSING in one statement; SKIP LOCKED keeps concurrent workers disjoint.
+     * Stamps the claim with a fresh fencing token, so later writes can tell this claim from a newer one.
+     */
     @Modifying
     @Query(value = """
             UPDATE reminders
             SET status = 'PROCESSING',
                 processing_started_at = now(),
-                attempt_count = attempt_count + 1
+                attempt_count = attempt_count + 1,
+                claim_token = :token
             WHERE id IN (
                 SELECT r.id
                 FROM reminders r
@@ -39,14 +43,15 @@ public interface ReminderRepository extends JpaRepository<Reminder, Long> {
             )
             RETURNING id
             """, nativeQuery = true)
-    List<Long> claimDueReminders(@Param("limit") int limit);
+    List<Long> claimDueReminders(@Param("limit") int limit, @Param("token") String token);
 
     /** Frees leases left by a dead worker; ones out of attempts are parked in FAILED, not looped forever. */
     @Modifying
     @Query(value = """
             UPDATE reminders
             SET status = CASE WHEN attempt_count >= :maxAttempts THEN 'FAILED' ELSE 'PENDING' END,
-                processing_started_at = NULL
+                processing_started_at = NULL,
+                claim_token = NULL
             WHERE status = 'PROCESSING'
               AND processing_started_at < now() - (:leaseMinutes * INTERVAL '1 minute')
             """, nativeQuery = true)
@@ -54,9 +59,10 @@ public interface ReminderRepository extends JpaRepository<Reminder, Long> {
                               @Param("maxAttempts") int maxAttempts);
 
     /**
-     * Returns a failed reminder to PENDING after the retry delay, or parks it in FAILED once out of
-     * attempts. Guarded on PROCESSING: a worker whose lease expired and whose reminder was since
-     * sent by another worker must not overwrite SENT. Returns 0 when the caller no longer owns it.
+     * Returns a reminder to PENDING after the retry delay, or parks it in FAILED once out of
+     * attempts. Fenced: only the claim holding {@code token} may release it, so a worker whose lease
+     * expired can't reset a newer worker's claim, or overwrite SENT. Returns 0 when the caller no
+     * longer owns it.
      */
     @Modifying
     @Query(value = """
@@ -64,13 +70,27 @@ public interface ReminderRepository extends JpaRepository<Reminder, Long> {
             SET status = CASE WHEN attempt_count >= :maxAttempts THEN 'FAILED' ELSE 'PENDING' END,
                 next_attempt_at = CASE WHEN attempt_count >= :maxAttempts THEN NULL
                                        ELSE now() + (:retryDelayMinutes * INTERVAL '1 minute') END,
-                processing_started_at = NULL
+                processing_started_at = NULL,
+                claim_token = NULL
             WHERE id = :id
               AND status = 'PROCESSING'
+              AND claim_token = :token
             """, nativeQuery = true)
     int releaseAfterFailure(@Param("id") Long id,
+                            @Param("token") String token,
                             @Param("maxAttempts") int maxAttempts,
                             @Param("retryDelayMinutes") int retryDelayMinutes);
+
+    /** The provider refused it for good (bad number): FAILED now, no retries. Fenced like the release. */
+    @Modifying
+    @Query(value = """
+            UPDATE reminders
+            SET status = 'FAILED', next_attempt_at = NULL, processing_started_at = NULL, claim_token = NULL
+            WHERE id = :id
+              AND status = 'PROCESSING'
+              AND claim_token = :token
+            """, nativeQuery = true)
+    int failPermanently(@Param("id") Long id, @Param("token") String token);
 
     @Modifying
     @Query(value = """

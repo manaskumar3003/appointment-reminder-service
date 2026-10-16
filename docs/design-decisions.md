@@ -50,7 +50,7 @@ Proven by `NoDuplicateReminderTest.concurrentWorkersCannotNotifyTheSameCustomerT
 
 ## Why two instances — and does one work?
 
-- **One works fine.** It handles 2,000 reminders a minute against a peak need of ~500. Nothing here needs a second node to be *correct*.
+- **One is correct.** Nothing here needs a second node to be *correct*. Against a real SMS provider one instance sends ~150 a minute (latency-bound, one send at a time), so the ~500/min peak is met by adding instances - see [Deployment](deployment.md).
 - **The second is for staying up, not keeping up.** With one instance, a crash means nothing goes out until it restarts, and whatever it had claimed sits stuck until then.
 - **With two, the survivor cleans up.** Rows the dead worker claimed are reclaimed after the lease expires and sent normally.
 - **Adding one costs nothing.** No leader election, no sharding, no scheduler to disable — just another container. That's what Postgres bought here.
