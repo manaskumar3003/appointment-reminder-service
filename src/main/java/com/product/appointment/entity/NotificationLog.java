@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.OffsetDateTime;
+import java.util.Optional;
 
 @Entity
 @Table(
@@ -40,13 +41,31 @@ public class NotificationLog {
     @Column(name = "sent_at")
     private OffsetDateTime sentAt;
 
+    /** Why the provider refused it, or why the outcome is unknown. */
+    @Column(name = "last_error", length = 500)
+    private String lastError;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
+    private static final String KEY_PREFIX = "reminder-";
+
     /** One key per reminder, so every retry of it is the same request as far as the provider knows. */
     public static String idempotencyKey(Long reminderId) {
-        return "reminder-" + reminderId;
+        return KEY_PREFIX + reminderId;
+    }
+
+    /** The reminder a key belongs to, for receipts that only carry our key. */
+    public static Optional<Long> reminderIdOf(String idempotencyKey) {
+        if (idempotencyKey == null || !idempotencyKey.startsWith(KEY_PREFIX)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Long.parseLong(idempotencyKey.substring(KEY_PREFIX.length())));
+        } catch (NumberFormatException e) {
+            return Optional.empty();
+        }
     }
 
     public Long getId() {
@@ -73,8 +92,24 @@ public class NotificationLog {
         return providerMessageId;
     }
 
+    public void setProviderMessageId(String providerMessageId) {
+        this.providerMessageId = providerMessageId;
+    }
+
     public OffsetDateTime getSentAt() {
         return sentAt;
+    }
+
+    public void setSentAt(OffsetDateTime sentAt) {
+        this.sentAt = sentAt;
+    }
+
+    public String getLastError() {
+        return lastError;
+    }
+
+    public void setLastError(String lastError) {
+        this.lastError = lastError == null || lastError.length() <= 500 ? lastError : lastError.substring(0, 500);
     }
 
     public OffsetDateTime getCreatedAt() {

@@ -127,7 +127,7 @@ class ReminderBenchmarkTest {
     private void seed(int appointments) {
         jdbc.update("""
                 INSERT INTO appointments (dealership_id, customer_contact, scheduled_at, status)
-                SELECT (i %% 500) + 1, '+1555' || lpad(i::text, 7, '0'),
+                SELECT (i %% 500) + 1, '+1555' || lpad(i::text, 7, '0') || '1',
                        now() + interval '2 hours', 'SCHEDULED'
                 FROM generate_series(1, %d) i
                 """.formatted(appointments));

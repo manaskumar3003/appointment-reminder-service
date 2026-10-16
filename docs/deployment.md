@@ -12,9 +12,12 @@
 | Over a 10-hour business day | ~170/min |
 | With a 3× peak | ~500/min, **~8/sec** |
 
-One instance handles `batch-size` × polls-per-minute = 500 × 4 = **2,000/min**.
-[Measured](benchmarks.md) capacity is far above that. One instance covers peak
-with ~4× headroom, so scaling is about staying up, not keeping up.
+With a real SMS provider the limit is the provider's latency, not the database.
+Sends go one at a time, so at ~300ms each a batch of 50 takes ~15s, plus a 5s
+poll gap: **~150/min per instance**. That covers the business-day average (~170/min)
+with two instances, and the 3× peak (~500/min) with four - or with fewer if sends
+are made concurrently. The database itself is [measured](benchmarks.md) at hundreds
+per second with an instant stub, so it isn't what runs out first.
 
 ## When to scale, and what to do
 

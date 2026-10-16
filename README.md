@@ -32,6 +32,12 @@ Books vehicle service appointments and reminds the customer 24 hours and 2 hours
 > then records `SENT`; a reconciler settles anything left unconfirmed. Three new tests;
 > about a third of the drain throughput
 > ([measured](docs/benchmarks.md#since-submission-recording-intent-before-the-send)).
+>
+> After the interview, handled a provider that acknowledges late or never: a timeout is
+> `UNKNOWN`, never resent blindly — the retry first asks the provider for the idempotency
+> key; signed, idempotent delivery-receipt webhook; still unknown past a deadline →
+> `IN_DOUBT` with an alert. Covered by `UnreliableProviderTest`; `./scripts/demo.ps1 chaos`
+> plays every case.
 
 ## How to run
 
@@ -131,8 +137,8 @@ Everything tunable lives under `reminders.*` in `src/main/resources/application.
 
 | Key | Default | |
 |---|---|---|
-| `batch-size` | 500 | Reminders claimed per poll, per instance. |
-| `poll-interval-ms` | 15000 | How often a worker looks for due reminders. |
+| `batch-size` | 50 | Reminders claimed per poll, per instance. Sized so a batch fits the lease even if every send hits the provider timeout. |
+| `poll-interval-ms` | 5000 | How often a worker looks for due reminders. |
 | `max-attempts` | 3 | Retries before a reminder is parked in `FAILED`. |
 | `retry-delay-minutes` | 5 | How long a failed reminder waits before it's eligible again. |
 | `lease-minutes` | 5 | How long a claim may sit in `PROCESSING` before it is assumed dead and retried. |

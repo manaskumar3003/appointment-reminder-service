@@ -35,14 +35,17 @@ management:
   endpoints:
     web:
       exposure:
-        # Health only. It includes a database check, so an orchestrator sees a lost
-        # Postgres as DOWN rather than a running JVM as UP.
-        include: health
+        # Health includes a database check, so an orchestrator sees a lost Postgres as DOWN.
+        # Metrics carries reminders.outcome{outcome=sent|unknown|rejected|probe_*|in_doubt|receipt_*}.
+        include: health,metrics
 
 reminders:
-  # 500 every 15s = 2000/min per instance, against a peak need of ~500/min.
-  batch-size: 500
-  poll-interval-ms: 15000
+  # Sized for a real SMS provider, not the instant stub. Sends are one at a time, so a batch
+  # takes batch-size x provider latency: 50 x ~300ms = ~15s normally, and 50 x a 5s timeout
+  # = 250s at worst - still inside the 5-minute lease, so a slow provider can't make a live
+  # claim look dead. Throughput is set by latency, not batch: ~150/min per instance.
+  batch-size: 50
+  poll-interval-ms: 5000
   # Retries before a reminder is parked in FAILED, and how long to wait between them.
   # 3 attempts 5 minutes apart rides out a provider blip; retrying on the next poll
   # would spend all three inside a minute.
@@ -50,3 +53,8 @@ reminders:
   retry-delay-minutes: 5
   # How long a claim may sit in PROCESSING before the worker is assumed dead.
   lease-minutes: 5
+  # A send the provider never answered for, and still can't confirm after this long, becomes
+  # IN_DOUBT and raises an ALERT - never a blind resend.
+  unknown-deadline-minutes: 30
+  # Shared secret the provider signs delivery receipts with (X-Signature: hex HMAC-SHA256).
+  webhook-secret: ${WEBHOOK_SECRET:dev-webhook-secret}
